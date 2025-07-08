@@ -13,6 +13,7 @@ A bash script to download, convert, and run the Passbolt Pro Debian OVA in QEMU.
 - Conversion from VMDK to QCOW2 format
 - Automatic VM startup with port forwarding
 - SSH access to the VM
+- Cross-platform compatibility (macOS and Linux)
 
 ### Requirements
 
@@ -21,6 +22,8 @@ A bash script to download, convert, and run the Passbolt Pro Debian OVA in QEMU.
 - sshpass (for password-based SSH login)
 - tar (for extracting OVA files)
 - nc (netcat, for port checking)
+- curl (for downloading checksums)
+- Either `shasum` (macOS) or `sha512sum` (Linux) for checksum verification
 
 ### Usage
 

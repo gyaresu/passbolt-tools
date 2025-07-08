@@ -67,8 +67,18 @@ else
 
   echo "$CHECKSUM  passbolt-pro-debian-latest-stable.ova" > passbolt-pro-debian-latest-stable.ova.sha512
 
+  # Determine which checksum command to use (macOS uses shasum, Linux uses sha512sum)
+  if command -v shasum &> /dev/null; then
+    SHASUM_CMD="shasum -a 512"
+  elif command -v sha512sum &> /dev/null; then
+    SHASUM_CMD="sha512sum"
+  else
+    echo "❌ Neither shasum nor sha512sum found. Cannot verify checksum."
+    exit 1
+  fi
+
   echo "🔐 Verifying SHA-512 checksum..."
-  if ! shasum -a 512 -c passbolt-pro-debian-latest-stable.ova.sha512 --ignore-missing; then
+  if ! $SHASUM_CMD -c passbolt-pro-debian-latest-stable.ova.sha512 --ignore-missing; then
     echo "❌ Checksum verification failed. Aborting."
     exit 1
   fi
