@@ -1,43 +1,41 @@
 # passbolt-tools
 
-A collection of tools for working with Passbolt password manager.
+Tools for Passbolt password manager administration and testing.
 
-## run_ova.sh
+## ova_launcher.sh
 
-A bash script to download, convert, and run the Passbolt Pro Debian OVA in QEMU. This allows you to easily test or use Passbolt Pro in a virtual environment without needing VirtualBox or VMware.
+Bash script for downloading, converting, and running Passbolt Pro Debian OVA in QEMU. Provides a local testing environment without VirtualBox or VMware dependencies.
 
-### Features
+### Capabilities
 
-- Automatic download of the latest Passbolt Pro Debian OVA
+- Downloads latest Passbolt Pro Debian OVA
 - SHA-512 checksum verification
-- Conversion from VMDK to QCOW2 format
-- Automatic VM startup with port forwarding
-- SSH access to the VM
-- Cross-platform compatibility (macOS and Linux)
+- VMDK to QCOW2 conversion
+- VM startup with port forwarding
+- SSH access to VM
+- macOS and Linux support
 
-### Requirements
+### Dependencies
 
-- QEMU (`qemu-system-x86_64` and `qemu-img`)
-- aria2c (for faster downloads)
-- sshpass (for password-based SSH login)
-- tar (for extracting OVA files)
-- nc (netcat, for port checking)
-- curl (for downloading checksums)
-- Either `shasum` (macOS) or `sha512sum` (Linux) for checksum verification
+- QEMU (`qemu-system-x86_64`, `qemu-img`)
+- aria2c
+- sshpass
+- tar
+- netcat
+- curl
+- `shasum` (macOS) or `sha512sum` (Linux)
 
 ### Usage
 
 ```bash
 # Use default QCOW2 name (pbp.qcow2)
-./run_ova.sh
+./ova_launcher.sh
 
 # Or specify a custom QCOW2 image
-./run_ova.sh custom-image.qcow2
+./ova_launcher.sh custom-image.qcow2
 ```
 
 ### Port Forwarding
-
-The script sets up the following port forwarding:
 
 | Host Port | VM Port | Service |
 |-----------|---------|---------|
@@ -48,4 +46,187 @@ The script sets up the following port forwarding:
 
 ### Default Credentials
 
-- SSH: `passbolt` / `admin`
+SSH: `passbolt` / `admin`
+
+## cert_wizard.py
+
+TLS certificate testing and validation tool for Passbolt deployments. Diagnoses certificate issues across LDAP, SMTP, HTTPS, and cache services.
+
+### Capabilities
+
+- Multi-service TLS certificate testing
+- Protocol detection (STARTTLS, Implicit TLS)
+- Certificate analysis (SAN, expiration, trust chain)
+- Passbolt configuration integration
+- Trust analysis and troubleshooting
+- HTML report generation
+- Docker container support
+
+### Dependencies
+
+- Python 3.6+
+- OpenSSL command-line tools
+- Network access to target services
+
+### Usage
+
+Test all configured services:
+```bash
+python3 cert_wizard.py
+python3 cert_wizard.py --report
+```
+
+Test specific service:
+```bash
+python3 cert_wizard.py --service ldaps --host ldap.local --port 636
+python3 cert_wizard.py --service smtps --host smtp.local --port 25
+python3 cert_wizard.py --service https --host passbolt.local --port 443
+```
+
+Debug mode:
+```bash
+python3 cert_wizard.py --debug
+```
+
+### Default Services
+
+| Service | Host | Port | Type | Purpose |
+|---------|------|------|------|---------|
+| LDAPS | ldap.local | 636 | ldaps | Directory synchronization |
+| SMTPS | smtp.local | 25 | smtps | Email notifications |
+| Passbolt HTTPS | passbolt.local | 443 | https | Web interface |
+| Keycloak HTTPS | keycloak.local | 8443 | https | SSO authentication |
+| Valkey | valkey | 6379 | valkey | Cache service |
+
+### Configuration Detection
+
+Reads Passbolt configuration from `/etc/environment` and current environment:
+
+- `PASSBOLT_PLUGINS_DIRECTORY_SYNC_SECURITY_SSL_CUSTOM_OPTIONS_*` (LDAP SSL)
+- `EMAIL_TRANSPORT_DEFAULT_*` (SMTP configuration)
+- `PASSBOLT_PLUGINS_SAML_SECURITY_SSL_CUSTOM_OPTIONS_*` (SSO SSL)
+- `CACHE_CAKECORE_*` (Cache configuration)
+
+### Certificate Validation
+
+- Certificate validity (expiration, format)
+- Hostname matching (SAN verification)
+- Trust chain analysis (self-signed vs CA-signed)
+- Purpose validation (key usage, extended key usage)
+- TLS configuration (protocol versions, cipher suites)
+- Service-specific trust requirements
+
+### Trust Analysis
+
+**LDAPS (Passbolt → LDAP Server)**
+- LDAP server certificate validation
+- CA file configuration verification
+- ldapsearch testing commands
+
+**SMTPS (Passbolt → SMTP Server)**
+- STARTTLS vs Implicit TLS detection
+- SMTP server certificate validation
+- Configuration guidance
+
+**HTTPS (Users → Passbolt/Keycloak)**
+- Browser trust requirements
+- OAuth2 SSO bidirectional trust
+- Certificate warning guidance
+
+**Valkey (Passbolt → Cache)**
+- Unencrypted connection analysis
+- Network security recommendations
+
+### HTML Reports
+
+The `--report` flag generates HTML reports containing:
+
+- Service status summary
+- Certificate information
+- Trust analysis and troubleshooting steps
+- Environment variable analysis
+- Network routes and port information
+- Administrative guidance
+
+### Common Issues
+
+**Certificate Hostname Mismatch**
+- Issue: Hostname not found in SAN
+- Solution: Update certificate to include hostname in Subject Alternative Names
+
+**Self-Signed Certificates**
+- Issue: Certificate is self-signed
+- Solution: Use CA-signed certificate or add to trusted store
+
+**Private CA Certificates**
+- Issue: Certificate signed by private CA
+- Solution: Use public CA (Let's Encrypt) or distribute private CA to all devices
+
+**Connection Failures**
+- Issue: Connection refused
+- Solution: Check service is running and port is correct
+
+### Troubleshooting Commands
+
+**LDAP Testing**
+```bash
+ldapsearch -H ldaps://ldap.local:636 -D "cn=admin,dc=local" -W -o tls_cacert=/etc/ssl/certs/ldaps_bundle.crt
+```
+
+**SMTP Testing**
+```bash
+openssl s_client -connect smtp.local:465
+openssl s_client -connect smtp.local:587 -starttls smtp
+```
+
+**HTTPS Testing**
+```bash
+curl -I https://passbolt.local:443
+```
+
+### Output Examples
+
+**JSON Output**
+```json
+{
+  "service": "ldaps",
+  "host": "ldap.local",
+  "port": 636,
+  "certificate": {
+    "subject": "CN=ldap.local",
+    "issuer": "CN=Passbolt Root CA",
+    "valid_from": "Jan 1 00:00:00 2024 GMT",
+    "valid_to": "Dec 31 23:59:59 2024 GMT",
+    "san": ["ldap.local"],
+    "is_self_signed": false,
+    "is_private_ca": true
+  },
+  "validation": {
+    "valid": true,
+    "issues": [],
+    "warnings": ["Certificate is signed by a private CA"],
+    "admin_guidance": ["For production: Use public CA certificate"]
+  }
+}
+```
+
+**HTML Report Features**
+- Status indicators
+- Detailed sections
+- Troubleshooting steps
+- Environment variable analysis
+- Network topology
+
+### Integration with Passbolt
+
+- Reads Passbolt environment variables automatically
+- Validates Passbolt-specific TLS configurations
+- Provides Passbolt-specific troubleshooting guidance
+- Generates reports suitable for Passbolt administrators
+
+### Security Considerations
+
+- Tool only reads configuration and tests connections
+- No sensitive data is logged or transmitted
+- Certificate validation follows security best practices
+- Provides guidance for secure certificate management

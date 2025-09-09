@@ -102,6 +102,7 @@ echo "🚀 Starting the VM in QEMU..."
 qemu-system-x86_64 \
   -m 8192 \
   -cpu qemu64 \
+  -smp 4 \
   -drive file="$QCOW2_FILE",if=virtio,format=qcow2 \
   -netdev user,id=net0,hostfwd=tcp::2222-:22,hostfwd=tcp::4433-:443,hostfwd=tcp::8080-:80,hostfwd=tcp::9025-:8025 \
   -device virtio-net,netdev=net0 > /dev/null 2>&1 &
