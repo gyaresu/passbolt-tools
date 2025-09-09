@@ -88,24 +88,35 @@ Debug mode:
 python3 cert_wizard.py --debug
 ```
 
-### Default Services
+### Service Detection
 
-| Service | Host | Port | Type | Purpose |
-|---------|------|------|------|---------|
-| LDAPS | ldap.local | 636 | ldaps | Directory synchronization |
-| SMTPS | smtp.local | 25 | smtps | Email notifications |
-| Passbolt HTTPS | passbolt.local | 443 | https | Web interface |
-| Keycloak HTTPS | keycloak.local | 8443 | https | SSO authentication |
-| Valkey | valkey | 6379 | valkey | Cache service |
+The script automatically detects services from Passbolt configuration:
+
+- **Passbolt HTTPS**: Extracted from `App.fullBaseUrl` in PHP config
+- **LDAP Service**: From LDAP configuration if present
+- **SMTP Service**: From email transport configuration if present  
+- **Cache Service**: From session/cache configuration (Valkey/Redis)
+
+**Fallback**: If no services are configured, tests localhost defaults:
+- Passbolt HTTPS: `localhost:443`
+- Cache: `localhost:6379`
+
+**Note**: When using the OVA launcher, external access is available through port forwarding:
+- Passbolt HTTPS: External port 4433 → Internal port 443
+- SSH: External port 2222 → Internal port 22
 
 ### Configuration Detection
 
-Reads Passbolt configuration from `/etc/environment` and current environment:
+Reads Passbolt configuration from multiple sources:
 
-- `PASSBOLT_PLUGINS_DIRECTORY_SYNC_SECURITY_SSL_CUSTOM_OPTIONS_*` (LDAP SSL)
-- `EMAIL_TRANSPORT_DEFAULT_*` (SMTP configuration)
-- `PASSBOLT_PLUGINS_SAML_SECURITY_SSL_CUSTOM_OPTIONS_*` (SSO SSL)
-- `CACHE_CAKECORE_*` (Cache configuration)
+- **Environment files**: `/etc/environment` and current environment
+- **PHP configuration**: `/etc/passbolt/passbolt.php` (with sudo access)
+- **Key variables**:
+  - `PASSBOLT_PLUGINS_DIRECTORY_SYNC_SECURITY_SSL_CUSTOM_OPTIONS_*` (LDAP SSL)
+  - `EMAIL_TRANSPORT_DEFAULT_*` (SMTP configuration)
+  - `PASSBOLT_PLUGINS_SAML_SECURITY_SSL_CUSTOM_OPTIONS_*` (SSO SSL)
+  - `CACHE_CAKECORE_*` (Cache configuration)
+  - `PASSBOLT_APP_FULL_BASE_URL` (from PHP config)
 
 ### Certificate Validation
 
@@ -181,7 +192,11 @@ openssl s_client -connect smtp.local:587 -starttls smtp
 
 **HTTPS Testing**
 ```bash
+# Internal testing (from within VM/container)
 curl -I https://passbolt.local:443
+
+# External testing (from host machine with port forwarding)
+curl -I https://passbolt.local:4433
 ```
 
 ### Output Examples

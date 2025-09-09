@@ -46,6 +46,13 @@ class TLSTester:
                         value = value.strip('"\'')
                         config['environment_variables'][key] = value
         
+        # Load Passbolt PHP configuration if it exists
+        passbolt_php = '/etc/passbolt/passbolt.php'
+        if os.path.exists(passbolt_php):
+            self.log(f"Loading Passbolt PHP configuration from {passbolt_php}")
+            php_config = self._parse_passbolt_php(passbolt_php)
+            config['environment_variables'].update(php_config)
+        
         # Also load from current environment
         for key, value in os.environ.items():
             if key.startswith(('PASSBOLT_', 'EMAIL_', 'CACHE_CAKECORE_')):
@@ -81,6 +88,64 @@ class TLSTester:
         
         self.passbolt_config = config
         return config
+    
+    def _parse_passbolt_php(self, php_file: str) -> Dict[str, str]:
+        """Parse Passbolt PHP configuration file and extract relevant settings."""
+        php_config = {}
+        
+        try:
+            with open(php_file, 'r', encoding='utf-8') as f:
+                content = f.read()
+            
+            # Extract configuration values using regex patterns
+            patterns = {
+                'PASSBOLT_APP_FULL_BASE_URL': r"'fullBaseUrl'\s*=>\s*['\"]([^'\"]+)['\"]",
+                'PASSBOLT_SSL_FORCE': r"'force'\s*=>\s*(true|false)"
+            }
+            
+            # Cache/Session configuration (more specific patterns)
+            cache_patterns = {
+                'CACHE_CAKECORE_HOST': r"'server'\s*=>\s*['\"]([^'\"]+)['\"]",
+                'CACHE_CAKECORE_PORT': r"'port'\s*=>\s*['\"]?(\d+)['\"]?"
+            }
+            
+            # Look for cache configuration section
+            cache_section_match = re.search(r"'Cache'\s*=>\s*\[(.*?)\]", content, re.DOTALL)
+            if cache_section_match:
+                cache_content = cache_section_match.group(1)
+                for env_key, pattern in cache_patterns.items():
+                    matches = re.findall(pattern, cache_content, re.IGNORECASE)
+                    if matches:
+                        value = matches[0]
+                        php_config[env_key] = value
+                        self.log(f"Found {env_key} = {value}")
+            
+            # Look for session configuration section
+            session_section_match = re.search(r"'session'\s*=>\s*\[(.*?)\]", content, re.DOTALL)
+            if session_section_match:
+                session_content = session_section_match.group(1)
+                for env_key, pattern in cache_patterns.items():
+                    matches = re.findall(pattern, session_content, re.IGNORECASE)
+                    if matches:
+                        value = matches[0]
+                        php_config[env_key] = value
+                        self.log(f"Found {env_key} = {value}")
+            
+            for env_key, pattern in patterns.items():
+                matches = re.findall(pattern, content, re.IGNORECASE)
+                if matches:
+                    # Take the first match
+                    value = matches[0]
+                    # Convert boolean strings
+                    if value.lower() in ['true', 'false']:
+                        value = value.lower()
+                    php_config[env_key] = value
+                    self.log(f"Found {env_key} = {value}")
+            
+        except Exception as e:
+            self.log(f"Error parsing PHP file {php_file}: {str(e)}")
+        
+        return php_config
     
     def detect_tls_protocol(self, host: str, port: int, service_type: str) -> Dict[str, Any]:
         """Detect which TLS protocol the service is using."""
@@ -250,11 +315,14 @@ class TLSTester:
             cert_info = result.stdout
             
             # Extract key information
+            valid_to = self._extract_field(cert_info, 'Not After:')
+            valid_from = self._extract_field(cert_info, 'Not Before:')
+            
             return {
                 'subject': self._extract_field(cert_info, 'Subject:'),
                 'issuer': self._extract_field(cert_info, 'Issuer:'),
-                'valid_from': self._extract_field(cert_info, 'Not Before:'),
-                'valid_to': self._extract_field(cert_info, 'Not After:'),
+                'valid_from': valid_from,
+                'valid_to': valid_to,
                 'san': self._extract_san(cert_info),
                 'is_self_signed': self._is_self_signed(cert_info),
                 'is_private_ca': self._is_private_ca(cert_info),
@@ -905,18 +973,77 @@ class TLSTester:
         return result
     
     def test_default_services(self) -> Dict[str, Any]:
-        """Test default services (hardcoded for Docker compatibility)."""
-        # Default services to test (matching test_services.yaml)
-        services = {
-            'ldaps': {'host': 'ldap.local', 'port': 636, 'type': 'ldaps'},
-            'smtps': {'host': 'smtp.local', 'port': 25, 'type': 'smtps'},
-            'https_passbolt': {'host': 'passbolt.local', 'port': 443, 'type': 'https'},
-            'https_keycloak': {'host': 'keycloak.local', 'port': 8443, 'type': 'https'},
-            'valkey': {'host': 'valkey', 'port': 6379, 'type': 'valkey'}
-        }
-        
-        # Load Passbolt configuration
+        """Test services based on actual Passbolt configuration."""
+        # Load Passbolt configuration first
         passbolt_config = self.load_passbolt_config()
+        
+        # Build services list from actual configuration
+        services = {}
+        
+        # Extract hostname from fullBaseUrl if available
+        full_base_url = passbolt_config.get('environment_variables', {}).get('PASSBOLT_APP_FULL_BASE_URL', '')
+        if full_base_url:
+            try:
+                from urllib.parse import urlparse
+                parsed_url = urlparse(full_base_url)
+                passbolt_host = parsed_url.hostname
+                # For certificate testing, use localhost:443 if hostname is not resolvable
+                # This handles cases like OVA where passbolt.local doesn't resolve
+                if passbolt_host and passbolt_host not in ['localhost', '127.0.0.1']:
+                    # Try to resolve the hostname, fall back to localhost if it fails
+                    try:
+                        import socket
+                        socket.gethostbyname(passbolt_host)
+                        test_host = passbolt_host
+                        self.log(f"Hostname {passbolt_host} resolves, using for testing")
+                    except socket.gaierror:
+                        test_host = 'localhost'
+                        self.log(f"Hostname {passbolt_host} does not resolve, using localhost for testing")
+                else:
+                    test_host = 'localhost'
+                
+                services['https_passbolt'] = {'host': test_host, 'port': 443, 'type': 'https'}
+                self.log(f"Testing Passbolt HTTPS: {test_host}:443 (from external URL: {full_base_url})")
+            except Exception as e:
+                self.log(f"Error parsing fullBaseUrl: {e}")
+        
+        # LDAP service from configuration
+        ldap_config = passbolt_config.get('services', {}).get('ldaps', {})
+        if ldap_config.get('host') and ldap_config.get('port'):
+            services['ldaps'] = {
+                'host': ldap_config['host'], 
+                'port': int(ldap_config['port']), 
+                'type': 'ldaps'
+            }
+            self.log(f"Detected LDAP service: {ldap_config['host']}:{ldap_config['port']}")
+        
+        # SMTP service from configuration
+        smtp_config = passbolt_config.get('services', {}).get('smtp', {})
+        if smtp_config.get('host') and smtp_config.get('port'):
+            services['smtps'] = {
+                'host': smtp_config['host'], 
+                'port': int(smtp_config['port']), 
+                'type': 'smtps'
+            }
+            self.log(f"Detected SMTP service: {smtp_config['host']}:{smtp_config['port']}")
+        
+        # Cache service from configuration
+        cache_config = passbolt_config.get('services', {}).get('valkey', {})
+        if cache_config.get('host') and cache_config.get('port'):
+            services['valkey'] = {
+                'host': cache_config['host'], 
+                'port': int(cache_config['port']), 
+                'type': 'valkey'
+            }
+            self.log(f"Detected Cache service: {cache_config['host']}:{cache_config['port']}")
+        
+        # If no services found from config, fall back to localhost defaults
+        if not services:
+            self.log("No services found in configuration, using localhost defaults")
+            services = {
+                'https_passbolt': {'host': 'localhost', 'port': 443, 'type': 'https'},
+                'valkey': {'host': 'localhost', 'port': 6379, 'type': 'valkey'}
+            }
         
         # Validate Passbolt TLS configuration
         passbolt_config_validation = self.validate_passbolt_tls_config()
@@ -1237,8 +1364,23 @@ class TLSTester:
             has_blocking_issues = service_data['validation'].get('issues', [])
             has_warnings = service_data['validation'].get('warnings', [])
             
-            if has_blocking_issues:
-                critical_issues.append((service_name, service_data))
+            # Special handling for non-TLS services like Valkey
+            if service_name == 'valkey' and 'no working tls protocol detected' in str(has_blocking_issues).lower():
+                # Valkey without TLS is expected - consider it working
+                working_services.append((service_name, service_data))
+            elif has_blocking_issues:
+                # Check if blocking issues are just hostname mismatches (common in test environments)
+                hostname_issues_only = all(
+                    'hostname' in issue.lower() and 'not found in san' in issue.lower()
+                    for issue in has_blocking_issues
+                )
+                
+                if hostname_issues_only and has_warnings:
+                    # Hostname mismatch with warnings - put in warnings category
+                    warnings.append((service_name, service_data))
+                else:
+                    # Real blocking issues
+                    critical_issues.append((service_name, service_data))
             elif has_warnings:
                 # Check if warnings are just minor (self-signed, no SAN) vs serious
                 minor_warnings_only = all(
