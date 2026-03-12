@@ -33,7 +33,23 @@ Bash script for downloading, converting, and running Passbolt Pro Debian OVA in 
 
 # Or specify a custom QCOW2 image
 ./ova_launcher.sh custom-image.qcow2
+
+# Launch with Firefox instead of auto-detected browser
+./ova_launcher.sh --browser=firefox
+
+# Skip automatic browser launch
+./ova_launcher.sh --no-browser
 ```
+
+### Options
+
+| Flag | Description |
+|------|-------------|
+| `--skip-checksum` | Skip checksum verification |
+| `--skip-ssh-wait` | Skip waiting for SSH |
+| `--browser=BROWSER` | Launch browser with temp profile: `chrome`, `firefox`, `auto` (default: `auto`) |
+| `--no-browser` | Skip automatic browser launch |
+| `--help`, `-h` | Show help message |
 
 ### Port Forwarding
 
@@ -41,7 +57,7 @@ Bash script for downloading, converting, and running Passbolt Pro Debian OVA in 
 |-----------|---------|---------|
 | 2222      | 22      | SSH     |
 | 4433      | 443     | HTTPS   |
-| 8080      | 80      | HTTP    |
+| 8081      | 80      | HTTP    |
 | 9025      | 8025    | Mail    |
 
 ### Default Credentials
